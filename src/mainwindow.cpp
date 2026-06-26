@@ -127,9 +127,12 @@ MainWindow::MainWindow(QWidget *parent)
           [=]() { utils::desktopOpenUrl(returnPath("downloaded")); });
 
   check_for_startup();
+  check_for_daily_update();
 
   connect(_ui_settings.startUp, SIGNAL(toggled(bool)), this,
           SLOT(launch_on_startup_toggled(bool)));
+  connect(_ui_settings.dailyUpdate, SIGNAL(toggled(bool)), this,
+          SLOT(daily_update_toggled(bool)));
 
   _ui_settings.fullRes->setChecked(settings.value("fullRes", true).toBool());
   connect(_ui_settings.fullRes, &QCheckBox::toggled,
@@ -873,4 +876,71 @@ void MainWindow::check_for_startup() {
   QFile autostartfile(autostartpath + QDir::separator() + launcher_name +
                       ".desktop");
   _ui_settings.startUp->setChecked(QFileInfo(autostartfile).exists());
+}
+
+// slot for daily update toggled
+void MainWindow::daily_update_toggled(bool enabled) {
+#ifdef Q_OS_LINUX
+  run_daily_update(enabled);
+#else
+  QMessageBox::information(this, QApplication::applicationName() + " | Error",
+                           "This feature is not supported on this OS");
+#endif
+}
+
+// set up daily update cron job
+void MainWindow::run_daily_update(bool enabled) {
+  QString launcher_path = QApplication::applicationFilePath();
+  QString cron_comment = "# BingWall daily wallpaper update";
+  QString cron_job = "10 0 * * * " + launcher_path + " --set";
+
+  // get current crontab
+  QProcess process;
+  process.start("crontab", QStringList() << "-l");
+  process.waitForFinished();
+  QString current_crontab = process.readAllStandardOutput();
+
+  QStringList lines = current_crontab.split('\n', Qt::SkipEmptyParts);
+  QStringList new_lines;
+
+  // filter out our existing entries
+  bool found = false;
+  for (const QString &line : lines) {
+    if (line.contains(cron_comment) || line.contains("BingWall") ||
+        (line.contains(launcher_path) && line.contains("--set"))) {
+      found = true;
+      continue;
+    }
+    new_lines << line;
+  }
+
+  if (enabled) {
+    // add new cron job
+    new_lines << cron_comment;
+    new_lines << cron_job;
+  }
+
+  // write new crontab
+  QString new_crontab = new_lines.join('\n') + '\n';
+  QProcess crontab_process;
+  crontab_process.start("crontab", QStringList() << "-");
+  crontab_process.write(new_crontab.toUtf8());
+  crontab_process.closeWriteChannel();
+  crontab_process.waitForFinished();
+}
+
+// check if daily update cron job exists
+void MainWindow::check_for_daily_update() {
+  QString launcher_path = QApplication::applicationFilePath();
+
+  QProcess process;
+  process.start("crontab", QStringList() << "-l");
+  process.waitForFinished();
+  QString current_crontab = process.readAllStandardOutput();
+
+  bool exists = current_crontab.contains("BingWall") ||
+                (current_crontab.contains(launcher_path) &&
+                 current_crontab.contains("--set"));
+
+  _ui_settings.dailyUpdate->setChecked(exists);
 }

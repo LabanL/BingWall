@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <QListWidgetItem>
 #include <QSettings>
+#include <QProcess>
 
 #include "request.h"
 #include "waitingspinnerwidget.h"
@@ -72,6 +73,9 @@ private slots:
     void check_for_startup();
     void launch_on_startup_toggled(bool arg1);
     void run_onstartup(bool enabled);
+    void check_for_daily_update();
+    void daily_update_toggled(bool enabled);
+    void run_daily_update(bool enabled);
     bool saveWall(const QString &path, QString imagePath);
     void updateAbout();
 private:

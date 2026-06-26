@@ -17,7 +17,7 @@ bool controlButton::eventFilter(QObject *obj, QEvent *event) {
 
 void controlButton::mouseMoveEvent(QMouseEvent *e) {
 
-  QToolTip::showText(this->mapToGlobal(e->position().toPoint()),
+  QToolTip::showText(this->mapToGlobal(e->pos()),
                      this->toolTip());
 
   QPushButton::mouseMoveEvent(e);
