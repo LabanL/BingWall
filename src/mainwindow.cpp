@@ -892,41 +892,98 @@ void MainWindow::daily_update_toggled(bool enabled) {
 void MainWindow::run_daily_update(bool enabled) {
   QString launcher_path = QApplication::applicationFilePath();
   QString cron_comment = "# BingWall daily wallpaper update";
-  QString cron_job = "10 0 * * * " + launcher_path + " --set";
 
-  // get current crontab
-  QProcess process;
-  process.start("crontab", QStringList() << "-l");
-  process.waitForFinished();
-  QString current_crontab = process.readAllStandardOutput();
-
-  QStringList lines = current_crontab.split('\n', Qt::SkipEmptyParts);
-  QStringList new_lines;
-
-  // filter out our existing entries
-  bool found = false;
-  for (const QString &line : lines) {
-    if (line.contains(cron_comment) || line.contains("BingWall") ||
-        (line.contains(launcher_path) && line.contains("--set"))) {
-      found = true;
-      continue;
-    }
-    new_lines << line;
-  }
+  // Create wrapper script that resolves graphical session environment for cron
+  QString script_path = _data_path + "/bingwall-update.sh";
+  QString script_content =
+      "#!/bin/bash\n"
+      "# Resolve graphical session environment for cron\n"
+      "PID=$(pgrep -u \"$USER\" -x gnome-shell 2>/dev/null | head -1)\n"
+      "[ -z \"$PID\" ] && PID=$(pgrep -u \"$USER\" -x gnome-session 2>/dev/null "
+      "| head -1)\n"
+      "if [ -n \"$PID\" ] && [ -r \"/proc/$PID/environ\" ]; then\n"
+      "  ENV_VARS=$(tr '\\0' '\\n' < \"/proc/$PID/environ\")\n"
+      "  export \"$(echo \"$ENV_VARS\" | grep '^DISPLAY=')\"\n"
+      "  export \"$(echo \"$ENV_VARS\" | grep "
+      "'^DBUS_SESSION_BUS_ADDRESS=')\"\n"
+      "  export \"$(echo \"$ENV_VARS\" | grep '^XDG_RUNTIME_DIR=')\"\n"
+      "  export \"$(echo \"$ENV_VARS\" | grep '^WAYLAND_DISPLAY=')\"\n"
+      "fi\n" +
+      launcher_path + " --set\n";
 
   if (enabled) {
+    // write wrapper script
+    QFile script(script_path);
+    if (script.open(QIODevice::WriteOnly | QIODevice::Text)) {
+      QTextStream stream(&script);
+      stream << script_content;
+      script.close();
+      script.setPermissions(QFile::ExeOwner | QFile::ReadOwner);
+    }
+
+    QString cron_job =
+        QString("10 0 * * * bash ") + script_path;
+
+    // get current crontab
+    QProcess process;
+    process.start("crontab", QStringList() << "-l");
+    process.waitForFinished();
+    QString current_crontab = process.readAllStandardOutput();
+
+    QStringList lines = current_crontab.split('\n', Qt::SkipEmptyParts);
+    QStringList new_lines;
+
+    // filter out our existing entries
+    for (const QString &line : lines) {
+      if (line.contains(cron_comment) || line.contains("BingWall") ||
+          (line.contains(launcher_path) && line.contains("--set")) ||
+          line.contains("bingwall-update.sh")) {
+        continue;
+      }
+      new_lines << line;
+    }
+
     // add new cron job
     new_lines << cron_comment;
     new_lines << cron_job;
-  }
 
-  // write new crontab
-  QString new_crontab = new_lines.join('\n') + '\n';
-  QProcess crontab_process;
-  crontab_process.start("crontab", QStringList() << "-");
-  crontab_process.write(new_crontab.toUtf8());
-  crontab_process.closeWriteChannel();
-  crontab_process.waitForFinished();
+    // write new crontab
+    QString new_crontab = new_lines.join('\n') + '\n';
+    QProcess crontab_process;
+    crontab_process.start("crontab", QStringList() << "-");
+    crontab_process.write(new_crontab.toUtf8());
+    crontab_process.closeWriteChannel();
+    crontab_process.waitForFinished();
+  } else {
+    // remove wrapper script and cron entry
+    QFile(script_path).remove();
+
+    QProcess process;
+    process.start("crontab", QStringList() << "-l");
+    process.waitForFinished();
+    QString current_crontab = process.readAllStandardOutput();
+
+    QStringList lines = current_crontab.split('\n', Qt::SkipEmptyParts);
+    QStringList new_lines;
+
+    for (const QString &line : lines) {
+      if (line.contains(cron_comment) || line.contains("BingWall") ||
+          (line.contains(launcher_path) && line.contains("--set")) ||
+          line.contains("bingwall-update.sh")) {
+        continue;
+      }
+      new_lines << line;
+    }
+
+    QString new_crontab = new_lines.isEmpty()
+                              ? ""
+                              : new_lines.join('\n') + '\n';
+    QProcess crontab_process;
+    crontab_process.start("crontab", QStringList() << "-");
+    crontab_process.write(new_crontab.toUtf8());
+    crontab_process.closeWriteChannel();
+    crontab_process.waitForFinished();
+  }
 }
 
 // check if daily update cron job exists
@@ -939,6 +996,7 @@ void MainWindow::check_for_daily_update() {
   QString current_crontab = process.readAllStandardOutput();
 
   bool exists = current_crontab.contains("BingWall") ||
+                current_crontab.contains("bingwall-update.sh") ||
                 (current_crontab.contains(launcher_path) &&
                  current_crontab.contains("--set"));
 
